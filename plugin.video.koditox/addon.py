@@ -21,12 +21,31 @@ def load_native_library():
 
     addon_dir = os.path.dirname(os.path.abspath(__file__))
     xbmc.log(f"[plugin.video.koditox] trying to load native library")
+
     if sys.platform.startswith('win'):
+        xbmc.log("[plugin.video.koditox] Detected Environment: Windows", xbmc.LOGINFO)
         lib_name = "koditox.dll"
     elif sys.platform.startswith('darwin'):
+        machine = platform.machine().lower()
+        if "arm" in machine or "aarch64" in machine:
+            xbmc.log("[plugin.video.koditox] Detected Environment: MacOS arm64", xbmc.LOGINFO)
+            lib_name = "koditox_arm64.dylib"
+        xbmc.log("[plugin.video.koditox] Detected Environment: MacOS x86_64", xbmc.LOGINFO)
         lib_name = "koditox.dylib"
-    else:
-        lib_name = "libkoditox.so"
+    elif sys.platform.startswith('linux'):
+        machine = platform.machine().lower()
+        # Check for Raspberry Pi 64-bit / Android 64-bit ARM
+        if "aarch64" in machine or "arm64" in machine:
+            xbmc.log("[plugin.video.koditox] Detected Environment: Linux ARM 64-bit (Raspberry Pi)", xbmc.LOGINFO)
+            lib_name = "libkoditox_arm64.so"
+        # Check for standard Intel/AMD Linux computers
+        elif "x86_64" in machine or "amd64" in machine:
+            xbmc.log("[plugin.video.koditox] Detected Environment: Linux Desktop/Server x86_64", xbmc.LOGINFO)
+            lib_name = "libkoditox_x86_64.so"
+        # Fallback for older 32-bit Raspberry Pi setups
+        elif "arm" in machine:
+            xbmc.log("[plugin.video.koditox] Detected Environment: Linux ARM 32-bit (Legacy RPi)", xbmc.LOGINFO)
+            lib_name="libkoditox_arm32.so"
 
     lib_path = os.path.join(addon_dir, 'resources', 'lib', lib_name)
     xbmc.log(f"[Koditox Native] Target path evaluated to: {lib_path}", xbmc.LOGINFO)
@@ -190,20 +209,21 @@ def get_platform_binary_name():
     to deliver the exact matched ffmpeg binary name.
     """
     if sys.platform.startswith('win'):
+        xbmc.log("[plugin.video.koditox] Detected Environment: Windows", xbmc.LOGINFO)
         return "ffmpeg_win_x64.exe"
-        
     elif sys.platform.startswith('darwin'):
         machine = platform.machine().lower()
         if "arm" in machine or "aarch64" in machine:
+            xbmc.log("[plugin.video.koditox] Detected Environment: MacOS arm64", xbmc.LOGINFO)
             return "ffmpeg_mac_arm64"
+        xbmc.log("[plugin.video.koditox] Detected Environment: MacOS x86_64", xbmc.LOGINFO)
         return "ffmpeg_mac_x86_64"
-
     elif sys.platform.startswith('linux'):
         machine = platform.machine().lower()
         
         # Check for Raspberry Pi 64-bit / Android 64-bit ARM
         if "aarch64" in machine or "arm64" in machine:
-            xbmc.log("[plugin.video.koditox] Detected Environment: Linux ARM 64-bit (Raspberry Pi/Odroid)", xbmc.LOGINFO)
+            xbmc.log("[plugin.video.koditox] Detected Environment: Linux ARM 64-bit (Raspberry Pi)", xbmc.LOGINFO)
             return "ffmpeg_linux_arm64"
             
         # Check for standard Intel/AMD Linux computers

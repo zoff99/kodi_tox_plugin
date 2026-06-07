@@ -11,8 +11,8 @@ cd "$_HOME_" || exit 1
 docker run --rm dockcross/linux-arm64 > ./dockcross-linux-arm64; chmod +x ./dockcross-linux-arm64 || exit 1
 
 ./dockcross-linux-arm64 bash -c 'ls -al;id;pwd;hostname;uname -a' || exit 1
-# ./dockcross-linux-arm64 bash -c './deps_linux.sh raspi' || exit 1
-./dockcross-linux-arm64 bash -c './deps_linux.sh raspi "" nodownload' || exit 1
+./dockcross-linux-arm64 bash -c './deps_linux.sh raspi' || exit 1
+# ./dockcross-linux-arm64 bash -c './deps_linux.sh raspi "" nodownload' || exit 1
 
 ./dockcross-linux-arm64 bash -c '
 $CC -shared -g -O3 -fPIC -D_FORTIFY_SOURCE=2 --param=ssp-buffer-size=1 -fstack-protector-all \
@@ -33,12 +33,12 @@ $CC -shared -g -O3 -fPIC -D_FORTIFY_SOURCE=2 --param=ssp-buffer-size=1 -fstack-p
     ./inst/lib/libavutil.a \
     ./inst/lib/libsodium.a \
     -Wl,--no-whole-archive \
-    -o libkoditox.so \
+    -o libkoditox_arm64.so \
     -lpthread -lm -ldl
 ' || exit 1
 
-file libkoditox.so
-ls -al libkoditox.so
-ls -hal $(pwd)/libkoditox.so || exit 1
+file libkoditox_arm64.so
+ls -al libkoditox_arm64.so
+ls -hal $(pwd)/libkoditox_arm64.so || exit 1
 
-cp -av libkoditox.so ../plugin.video.koditox/resources/lib/libkoditox.so
+cp -av libkoditox_arm64.so ../plugin.video.koditox/resources/lib/libkoditox_arm64.so

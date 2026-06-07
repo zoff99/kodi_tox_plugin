@@ -366,6 +366,7 @@ cd libvpx*/
                                          --enable-temporal-denoising \
                                          --enable-static \
                                          --disable-examples \
+                                         --disable-mmx --disable-sse --disable-sse2 --disable-sse3 --disable-ssse3 --disable-sse4_1 --disable-avx --disable-avx2 --disable-avx512 --disable-vsx \
                                          --disable-tools \
                                          --disable-docs \
                                          --disable-unit-tests || exit 1
@@ -383,6 +384,7 @@ fi
 
 # --- NASM ---
 
+#if 0
 if [ "$1""x" == "raspix" ]; then
     echo "*** RASPI ***"
 else
@@ -411,6 +413,7 @@ else
     cd "$_HOME_"
 fi
 # --- NASM ---
+#endif
 
 
 # ---------- x264 ---------
@@ -438,7 +441,7 @@ cd x264/
                                          --enable-pic || exit 
   else
     ./configure \
-                                         --enable-asm \
+                                         --disable-asm \
                                          --prefix="$_INST_" \
                                          --disable-opencl \
                                          --enable-static \
