@@ -18,7 +18,8 @@ It can receive decentralized, encrypted video calls and streams them directly on
 - The plugin only supports these specific architectures due to native library dependencies
 
 ### Required Tox Client
-You need a Tox client that uses the H264-capable c-toxcore implementation. Recommended clients include:
+You need a Tox client that uses the H264-capable c-toxcore implementation.<br>
+Recommended clients include:
 - **[TRIfA](https://github.com/zoff99/ToxAndroidRefImpl)**
 - **[TRIfA for Desktop](https://github.com/Zoxcore/trifa_material)**
 
