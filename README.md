@@ -32,6 +32,10 @@ Recommended clients include:
 **You must start the video call on your Tox client first**, then select **`Watch Tox Video Stream`** in Kodi.<br>
 The Kodi addon only receives video streams, it does not initiate calls.
 
+## Audio Streaming Status
+Audio streaming is currently disabled in this Kodi Tox plugin.<br>
+The codebase contains audio streaming infrastructure, but it is <b>intentionally disabled</b><br>
+due to technical issues with simultaneous audio/video playback in Kodi.
 
 ## 🚀 Featured Applications
 
