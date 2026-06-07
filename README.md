@@ -11,6 +11,13 @@ It can receive decentralized, encrypted video calls and streams them directly on
 
 <img src="https://img.shields.io/badge/license-GPLv3%2B-blue.svg" alt="GPLv3+" /></a>&nbsp;[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/zoff99/kodi_tox_plugin)
 
+## Usage
+It only works on kodi running on Linux x86_64 or on Raspberry Pi arm64.<br>
+You need a Tox Client using the H264 capable c-toxcore,<br>
+like [TRIfA](https://github.com/zoff99/ToxAndroidRefImpl) or [TRIfA for Desktop](https://github.com/Zoxcore/trifa_material)<br>
+Install the plugin zip file on your kodi system.<br>
+the select `Start Tox`. scan the QR Code to connect your Tox Client to Kodi.<br>
+<b>Important Note:</b> you must first start the Video Call on your Tox Client, and only then select `Watch Tox Video Stream`<br>
 
 ## 🚀 Featured Applications
 
