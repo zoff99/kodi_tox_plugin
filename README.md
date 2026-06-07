@@ -24,7 +24,7 @@ Recommended clients include:
 - **[TRIfA for Desktop](https://github.com/Zoxcore/trifa_material)**
 
 ### Installation Steps
-1. Install the [plugin zip file](https://github.com/zoff99/kodi_tox_plugin/releases/tag/nightly) on your Kodi system
+1. Install the [plugin.video.koditox.zip](https://github.com/zoff99/kodi_tox_plugin/releases) on your Kodi system
 2. Navigate to the addon and select **`Start Tox`** to initialize the Tox service
 3. Scan the displayed QR code using your Tox client to connect it to Kodi
 
