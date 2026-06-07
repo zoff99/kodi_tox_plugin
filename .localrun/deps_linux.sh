@@ -356,11 +356,12 @@ cd libvpx*/
                                          --disable-unit-tests || exit 1
   else
     ./configure \
+                                         --target=x86_64-linux-gcc \
                                          --prefix="$_INST_" \
                                          --disable-shared \
                                          --size-limit=16384x16384 \
-                                         --enable-onthefly-bitpacking \
-                                         --enable-runtime-cpu-detect \
+                                         --disable-onthefly-bitpacking \
+                                         --disable-runtime-cpu-detect \
                                          --enable-realtime-only \
                                          --enable-multi-res-encoding \
                                          --enable-temporal-denoising \
@@ -371,6 +372,7 @@ cd libvpx*/
                                          --disable-docs \
                                          --disable-unit-tests || exit 1
   fi
+  make clean
   make || exit 1
   make install
   unset CXXFLAGS
