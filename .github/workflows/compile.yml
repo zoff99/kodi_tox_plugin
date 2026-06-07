@@ -16,8 +16,8 @@ jobs:
       - name: Move nightly tag to head for nightly release
         run: git tag -f nightly && git push origin nightly -f
 
-  linux_nightly:
-    name: Nightly Artifact Linux Build
+  linux:
+    name: Artifact Linux Build
     runs-on: ubuntu-24.04
     needs: [update-nightly-tag]
     if: |
