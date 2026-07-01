@@ -29,13 +29,13 @@ Recommended clients include:
 3. Scan the displayed QR code using your Tox client to connect it to Kodi
 
 ### Important Usage Note
-**You must start the video call on your Tox client first**, then select **`Watch Tox Video Stream`** in Kodi.<br>
+**You must start the video call on your Tox client first**, then select **`Watch Tox Video Stream`** with the correct FPS in Kodi.<br>
 The Kodi addon only receives video streams, it does not initiate calls.
 
 ## Audio Streaming Status
-Audio streaming is currently disabled in this Kodi Tox plugin.<br>
-The codebase contains audio streaming infrastructure, but it is <b>intentionally disabled</b><br>
-due to technical issues with simultaneous audio/video playback in Kodi.
+Audio streaming is currently working in Kodi Tox plugin.<br>
+But sometimes it is lips sync with video, and sometimes it is not.
+Needs further research to find the issue and fix it.
 
 ## 🚀 Featured Applications
 
