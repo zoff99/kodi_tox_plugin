@@ -17,6 +17,16 @@ import platform
 
 ## break toxav/codecs/h264/codec.c:809
 
+
+## #####################
+##
+##
+DEBUG_MODE = False
+##
+##
+## #####################
+
+
 def load_native_library():
 
     addon_dir = os.path.dirname(os.path.abspath(__file__))
@@ -118,37 +128,29 @@ def build_main_menu(handle, base_url, native_lib, profile_path):
     xbmcplugin.addDirectoryItem(handle, url=start_url, listitem=start_item, isFolder=False)
 
 
+    # List of frame rates to generate
+    fps_options = [30, 25, 20]
 
-#
-#    # 3. NEW: Watch Tox Video Stream Menu Item
-#    video_item = xbmcgui.ListItem(label="Watch Tox Video Stream")
-#    # Setting the info block tells Kodi to treat this item as an interactive video asset
-#    video_item.setInfo('video', {
-#        'title': 'Tox 1080p Live Stream',
-#        'genre': 'Live Communication',
-#        'plot': 'Connects directly to the raw 1080p hardware-accelerated video pipeline.'
-#    })
-#    # Tell Kodi this item will immediately play a stream rather than open another directory folder
-#    video_item.setProperty('IsPlayable', 'true') 
-#    video_url = f"{base_url}?action=play_video"
-#    xbmcplugin.addDirectoryItem(handle, url=video_url, listitem=video_item, isFolder=False)
-#
+    for fps in fps_options:
+        # 1. Create the item with dynamic labels
+        label_text = f"Watch Tox Video Stream - {fps} fps only"
+        video_item = xbmcgui.ListItem(label=label_text)
 
-    # Watch Tox Video Stream Menu Item (Updated API)
-    video_item = xbmcgui.ListItem(label="Watch Tox Video Stream")
-    
-    # FIX: Get the clean modern video info tag object
-    video_tag = video_item.getVideoInfoTag()
-    video_tag.setTitle("Tox 1080p Live Stream")
-    video_tag.setGenres(["Live Communication"])
-    video_tag.setPlot("Connects directly to the raw 1080p hardware-accelerated video pipeline.")
-    video_tag.setMediaType("video")
-    
-    video_item.setProperty('IsPlayable', 'true') 
-    video_url = f"{base_url}?action=play_video"
-    xbmcplugin.addDirectoryItem(handle, url=video_url, listitem=video_item, isFolder=False)
-    
+        # 2. Set the metadata tags
+        video_tag = video_item.getVideoInfoTag()
+        video_tag.setTitle(f"Tox 1080p Live Stream ({fps} fps)")
+        video_tag.setGenres(["Live Communication"])
+        video_tag.setPlot(f"Connects directly to the raw 1080p hardware-accelerated video pipeline at {fps} fps.")
+        video_tag.setMediaType("video")
 
+        # 3. Configure playback properties
+        video_item.setProperty('IsPlayable', 'true')
+
+        # 4. Build the URL with two parameters
+        video_url = f"{base_url}?action=play_video&fps={fps}"
+
+        # 5. Add to the Kodi directory
+        xbmcplugin.addDirectoryItem(handle, url=video_url, listitem=video_item, isFolder=False)
 
 
     stop_item = xbmcgui.ListItem(label="Stop Tox")
@@ -185,6 +187,105 @@ def stop_tox(native_lib):
 
 
 
+
+
+import socket
+import threading
+import errno
+import time
+
+# Global control event to signal the proxy thread to stop
+stop_proxy_event = threading.Event()
+
+def run_audio_proxy_engine(c_input_port=28889, ffmpeg_output_port=28899):
+    """Intercepts active C stream frames and proxies them cleanly, featuring inbound packet proof logging."""
+    
+    stop_proxy_event.clear()
+
+    def proxy_worker():
+        try:
+            # 1. Open the listening port to capture your unmodified C code data
+            listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listen_sock.bind(('127.0.0.1', c_input_port))
+            listen_sock.settimeout(0.5) 
+            
+            # 2. Open the forwarding client socket headed down to FFmpeg
+            send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            xbmc.log(f"[plugin.video.koditox-proxy] Proxy active. Listening for C data on {c_input_port} -> forwarding to {ffmpeg_output_port}", xbmc.LOGINFO)
+            
+            rejection_count = 0
+            inbound_packet_count = 0
+            total_bytes_received = 0
+            
+            # 3. LIVE TRANS-FORWARD LOOP
+            while not stop_proxy_event.is_set():
+                try:
+                    data, addr = listen_sock.recvfrom(65535)
+                    if data:
+                        # --- DATA PROOF LOGGING FEATURES ---
+                        inbound_packet_count += 1
+                        data_len = len(data)
+                        total_bytes_received += data_len
+                        
+                        # Throttled logging: Prints data metrics exactly once every 50 packets (~1 second intervals)
+                        #if inbound_packet_count % 50 == 0:
+                        #    xbmc.log(
+                        #        f"[plugin.video.koditox-proxy] DATA_PROOF SUCCESS: Packet #{inbound_packet_count} received from C code "
+                        #        f"at address {addr}. Frame Size: {data_len} bytes. Total Volume Recv: {total_bytes_received} bytes.",
+                        #        xbmc.LOGINFO
+                        #    )
+                        ## -----------------------------------
+
+                        try:
+                            send_sock.sendto(data, ('127.0.0.1', ffmpeg_output_port))
+                        except socket.error as e:
+                            rejection_count += 1
+                            err_name = errno.errorcode.get(e.errno, "UNKNOWN_ERROR")
+                            # Throttled rejection logging to prevent spam
+                            if rejection_count % 50 == 0 or rejection_count == 1:
+                                xbmc.log(
+                                    f"[plugin.video.koditox-proxy] Rejection #{rejection_count}: [{err_name} (Code {e.errno})] "
+                                    f"Port {ffmpeg_output_port} refused packet. FFmpeg is still initializing video stream...",
+                                    xbmc.LOGDEBUG
+                                )
+                except socket.timeout:
+                    continue
+                        
+            xbmc.log("[plugin.video.koditox-proxy] Proxy thread loop flag signaled stop.", xbmc.LOGINFO)
+            
+        except Exception as e:
+            xbmc.log(f"[plugin.video.koditox-proxy] Proxy critical error: {str(e)}", xbmc.LOGERROR)
+        finally:
+            listen_sock.close()
+            send_sock.close()
+            xbmc.log("[plugin.video.koditox-proxy] Proxy sockets closed cleanly. Thread destroyed.", xbmc.LOGINFO)
+
+    t = threading.Thread(target=proxy_worker)
+    t.daemon = True
+    t.start()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz
 # /storage/ffmpeg-7.0.2-arm64-static/ffmpeg
 
@@ -198,6 +299,7 @@ import threading
 import xbmc
 import xbmcgui
 import xbmcplugin
+
 
 
 ffmpeg_process = None
@@ -238,7 +340,7 @@ def get_platform_binary_name():
 
     return None
 
-def run_ffmpeg_multiplexer():
+def run_ffmpeg_multiplexer(fps_from_tox='30'):
     global ffmpeg_process, ffmpeg_audio_process
     
     addon_dir = os.path.dirname(os.path.abspath(__file__))
@@ -264,49 +366,140 @@ def run_ffmpeg_multiplexer():
         creation_flags = 0x08000000
 
 
-    # =========================================================================
-    # ENGINE 1: YOUR PERFECT WORKING VIDEO PIPELINE (100% UNTOUCHED)
-    # =========================================================================
-    video_cmd = [
-        ffmpeg_bin, "-y", "-re",
-        "-fflags", "nobuffer+genpts+igndts",
-        "-f", "h264", 
-        "-i", "udp://127.0.0.1:28888?listen=1&overrun_nonfatal=1&buffer_size=524288&reuse=1&timeout=500000",
-        "-map", "0:v", 
-        "-c:v", "copy",       
-        "-an",  # Keep audio entirely deactivated here to prevent the -22 graph crash
-        "-f", "mpegts",
-        "-mpegts_flags", "resend_headers",
-        "-metadata", "service_provider=Tox", "-metadata", "service_name=Live",     
-        "-fflags", "nobuffer+flush_packets", "-flush_packets", "1",
-        "udp://127.0.0.1:28890?pkt_size=1316&overrun_nonfatal=1"
-    ]
+
+## -recast_media ??
+## -isync input_index (input) ??
+
+# kodi-send --action="ActivateWindow(Videos, plugin://plugin.video.koditox/)"
+# kodi-send --action="RunPlugin(plugin://plugin.video.koditox/?action=start)"
+# kodi-send --action="RunPlugin(plugin://plugin.video.koditox/?action=play_video)"
+# kodi-send --action="RunPlugin(plugin://plugin.video.koditox/?action=stop)"
+
+
+    if DEBUG_MODE == False:
+        xbmc.log("[plugin.video.koditox] truncating native log file", xbmc.LOGINFO)
+        # Truncate the native log file to 0 bytes before starting the stream
+        try:
+            with open("/tmp/koditox.log", "w"):
+                pass
+        except IOError:
+            pass  # Fails silently if the file or directory does not exist
 
     # =========================================================================
-    # ENGINE 2: PARALLEL PURE-AUDIO PIPELINE (ISOLATED)
     # =========================================================================
-    audio_cmd = [
-        ffmpeg_bin, "-y", "-re",
-        # Force a steady wallclock timeline on your native upmixed C packets
+    video_cmd = [
+        ffmpeg_bin,
+        # Global Flags
+    ]
+
+    if DEBUG_MODE:
+        xbmc.log("[plugin.video.koditox] setting debug mode ffmpeg flags", xbmc.LOGINFO)
+        video_cmd.extend([
+            "-v", "debug",
+            "-debug_ts",
+        ])
+    else:
+        # Optional: set a quieter log level when not debugging
+        video_cmd.extend([
+            "-v", "error",
+        ])
+
+    video_cmd.extend([
+        "-y",
+        "-max_error_rate", "1.0",
+        "-fflags", "nobuffer+genpts",
+        "-ignore_unknown",
+        "-frame_drop_threshold", "9999999999",
+        "-reinit_filter", "0",                         # Tells the filter complex to survive dead inputs
+
+##        "-max_muxing_queue_size", "10000",
+
+        # Video Input Block (Input 0)
+        "-f", "h264",
+        "-fflags", "+genpts+igndts",
+        "-r", fps_from_tox,
+        "-discard", "nokey",
+#        "-readrate_catchup", "5",
+###        "-readrate", "5",
+###        "-readrate_initial_burst", "100",
         "-use_wallclock_as_timestamps", "1",
-        "-f", "s16le", "-ch_layout", "stereo", "-ar", "48000", "-ac", "2",
-        "-i", "udp://127.0.0.1:28889?listen=1&overrun_nonfatal=1&buffer_size=524288&reuse=1&timeout=500000",
-        "-map", "0:a",
-        "-c:a", "aac", "-b:a", "128k",
-        "-af", "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
+        "-thread_queue_size", "16",
+        "-i", "udp://127.0.0.1:28888?listen=1&overrun_nonfatal=1&fifo_size=2000000&buffer_size=51231230&reuse=1&timeout=800000",
+
+        # Audio Input Block 1: Silence Baseline (Input 1) -> EXACT CONFIG COMPATIBLE
+        "-f", "lavfi",
+        "-thread_queue_size", "512",
+        # SWAPPED: sine filter replaced with anullsrc to provide a silent, continuous timeline driver
+        "-i", "anullsrc=sample_rate=48000,aformat=channel_layouts=stereo,arealtime",
+
+        # Audio Input Block 2: Real PCM Stream (Input 2)
+        "-f", "s16le", 
+        "-ar", "48000", 
+        "-ac", "2", 
+        "-probesize", "32",
+        "-analyzeduration", "0",
+        "-use_wallclock_as_timestamps", "1", 
+        "-thread_queue_size", "512",
+        "-i", "udp://127.0.0.1:28899?listen=1&overrun_nonfatal=1&buffer_size=1048576&reuse=1&timeout=10000",
+
+        # Maps
+        "-map", "0:v",
+        "-map", "[a]",
+
+        # Video Output Processing Configuration
+        "-c:v", "libx264",                    
+        "-preset", "ultrafast",               
+        "-tune", "zerolatency",               
+        "-g", fps_from_tox,
+        "-crf", "23",                         
+
+        # Audio Output Processing Configuration -> STRIPPED TIMESTAMP BREAKAGE
+        "-c:a", "aac",        
+        "-ac", "2",
+        "-filter_complex", (
+            "[2:a]asetpts=N,arealtime,aresample=async=1:min_hard_comp=0.010000[livepcm];"
+            "[1:a][livepcm]amix=inputs=2:duration=first:weights=1 1:dropout_transition=0:normalize=0[mixed];"
+            "[mixed]aresample=async=1:min_hard_comp=0.100000[a]"
+        ),
+
+        # Output Muxing Stream Engine
         "-f", "mpegts",
+        "-muxdelay", "2.0",
+        "-mpegts_copyts", "0",
         "-mpegts_flags", "resend_headers+initial_discontinuity",
-        "-fflags", "nobuffer+flush_packets", "-flush_packets", "1",
-        "udp://127.0.0.1:28891?pkt_size=1316&overrun_nonfatal=1" # Outputting on independent port 28891
+        "-metadata", "service_provider=Tox",
+        "-metadata", "service_name=Live",     
+        "-fflags", "nobuffer+flush_packets",
+        "-flush_packets", "1",
+        "udp://127.0.0.1:28890?pkt_size=1316&overrun_nonfatal=1"
+    ])
+
+
+    audio_cmd = [
+        ffmpeg_bin
     ]
     
     try:
         xbmc.log("[plugin.video.koditox] Spawning isolated dual-engine pipelines...", xbmc.LOGINFO)
-        
+
+        run_audio_proxy_engine(c_input_port=28889, ffmpeg_output_port=28899)
+
         # Launch Video Node
         ffmpeg_process = subprocess.Popen(
-            video_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.PIPE, close_fds=True, creationflags=creation_flags
+            video_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.PIPE, close_fds=True, creationflags=creation_flags
         )
+
+        # FIXED: Immediately drain stderr in a thread to prevent OS buffer deadlock
+        def log_ffmpeg_errors():
+            while ffmpeg_process:
+                line = ffmpeg_process.stderr.readline()
+                if not line:
+                    xbmc.log(f"[plugin.video.koditox-ffmpeg] exiting ffmpeg stderr logging loop", xbmc.LOGINFO)
+                    break
+                xbmc.log(f"[plugin.video.koditox-ffmpeg] {line.decode('utf-8', errors='ignore').strip()}", xbmc.LOGINFO)
+                    
+        diag_thread = threading.Thread(target=log_ffmpeg_errors, daemon=True)
+        diag_thread.start()
         
         # Launch Audio Node
         ## AUDIO ## ffmpeg_audio_process = subprocess.Popen(
@@ -335,7 +528,7 @@ def run_ffmpeg_multiplexer():
 tox_monitor = None
 
 
-def play_video(handle, native_lib):
+def play_video(handle, native_lib, fps='30'):
     global ffmpeg_process, ffmpeg_audio_process, tox_monitor
     list_item = xbmcgui.ListItem("Tox Video Call")
     
@@ -347,17 +540,19 @@ def play_video(handle, native_lib):
         # ---------------------------------------------------------------------
 
         if ffmpeg_process is None:
-            if not run_ffmpeg_multiplexer():
+            if not run_ffmpeg_multiplexer(fps):
                 raise RuntimeError("FFmpeg engines failed to initialize loop ports.")
             xbmc.sleep(800) 
 
         ## AUDIO ## ff_opts = "-f mpegts -probesize 16384 -analyzeduration 100000 -fflags nobuffer+genpts+igndts -flags low_delay"
-        ff_opts = "-f mpegts -probesize 16384 -analyzeduration 100000 -fflags nobuffer+genpts+igndts -flags low_delay -an"
-        
+        ## ff_opts = "-f mpegts -probesize 32 -analyzeduration 0 -fflags nobuffer+genpts+igndts -flags low_delay -an"
+        ## ok ## ff_opts = "-f mpegts -probesize 13160 -analyzeduration 10000 -fflags nobuffer+genpts+igndts -flags low_delay"
+        ff_opts = "-f mpegts -probesize 2000000 -analyzeduration 2000000 -fflags nobuffer+genpts -flags low_delay"
+
+
         stream_url = (
-            f"udp://127.0.0.1:28890?overrun_nonfatal=1&fifo_size=50000"
+            f"udp://127.0.0.1:28890?overrun_nonfatal=1&fifo_size=1500000"
             f"|ffmpegoptions={ff_opts}"
-            ## AUDIO ## f"|inputstream.ffmpegdirect.audio_src=udp://127.0.0.1:28891?overrun_nonfatal=1&fifo_size=50000"
         )
 
         xbmc.log(f"[plugin.video.koditox] Connecting to isolated multi-source engine link: {stream_url}", xbmc.LOGINFO)
@@ -379,7 +574,7 @@ def play_video(handle, native_lib):
         list_item.setProperty('inputstream.ffmpegdirect.open_mode', 'ffmpeg')
         
         ## AUDIO ## list_item.setProperty('inputstream.ffmpegdirect.audio_sw_sync', 'true')
-        list_item.setProperty('inputstream.ffmpegdirect.has_audio', 'false')
+        list_item.setProperty('inputstream.ffmpegdirect.has_audio', 'true')
 
         list_item.setProperty('force_direct_rendering', 'true')
         list_item.setProperty('realtime', 'true')
@@ -476,6 +671,9 @@ def hard_kill_tracked_pids():
     """Reads the stored PIDs and issues a kernel-level SIGKILL directly to the OS layers."""
     profile_dir = xbmcvfs.translatePath("special://profile/addon_data/plugin.video.koditox")
     pid_file = os.path.join(profile_dir, "ffmpeg_engines.pid")
+
+    stop_proxy_event.set()
+    xbmc.log(f"[plugin.video.koditox] stopping python audio udp thread", xbmc.LOGINFO)
     
     # Added logging to trace exactly where the cleanup looks for the file
     xbmc.log(f"[plugin.video.koditox] CHECKING for target PID file at path: {pid_file}", xbmc.LOGINFO)
@@ -697,7 +895,8 @@ def run():
     elif action == 'stop':
         stop_tox(native_lib)
     elif action == 'play_video':
-        play_video(handle, native_lib)
+        fps_value = params.get('fps', '30')
+        play_video(handle, native_lib, fps=fps_value)
     else:
         build_main_menu(handle, base_url, native_lib, profile_path)
 

@@ -6,6 +6,7 @@
 #endif
 #include <tox/toxav.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -221,7 +222,7 @@ static THREAD_RETURN toxava_worker_loop(void *arg) {
     write_log("toxava thread starting ...");
     while (gava_loop_running) {
         if (global_toxav != NULL) {
-            toxav_iterate(global_toxav);
+            toxav_audio_iterate(global_toxav);
         }
         sleep_ms(10);
     }
@@ -529,7 +530,7 @@ static void parse_and_check_sps(const uint8_t *sps, size_t size) {
     
     // Check if the resolution changed during runtime execution
     if (width != current_width || height != current_height) {
-        write_log("[Koditox Resolution] CHANGE DETECTED: %dx%dp -> %dx%dp\n", current_width, current_height, width, height);
+        write_log("[Koditox Resolution] CHANGE DETECTED: %dx%dp -> %dx%dp", current_width, current_height, width, height);
         current_width = width;
         current_height = height;
     }
@@ -599,6 +600,10 @@ void native_start_video_stream(const char* dummy_path) {
         kodi_audio_addr.sin_family = AF_INET;
         kodi_audio_addr.sin_port = htons(28889); // Audio port
         kodi_audio_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        write_log("[Koditox Native] Socket initialized successfully on port 28889");
+    } else {
+        write_log("[Koditox Native] ERROR: Failed to create socket");
     }
 
     // Toggle execution flag ON
@@ -786,11 +791,12 @@ static void t_toxav_receive_audio_frame_cb(ToxAV *av, uint32_t friend_number,
         uint32_t sampling_rate,
         void *user_data)
 {
+    // write_log("[Koditox Native] ENTER t_toxav_receive_audio_frame_cb ...");
 }
 
 
 
-
+static uint32_t logged_frames_count = 0;
 
 // === FIXED: AUDIO STREAMING CALLBACK WITH NATIVE MONO->STEREO UPMIXING ===
 static void t_toxav_receive_audio_frame_pts_cb(ToxAV *av, uint32_t friend_number,
@@ -801,34 +807,22 @@ static void t_toxav_receive_audio_frame_pts_cb(ToxAV *av, uint32_t friend_number
         void *user_data,
         uint64_t pts)
 {
-
-
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-    //   disabled for now. the kodi video addon can not play audio and video together at this time
-    //   and if you do not send audio on your call nothing will play at all.
-    //   need to find out another time why
-    return;
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-    // ************** ATTENTION **************
-
-
+    // write_log("[Koditox Native] ENTER t_toxav_receive_audio_frame_pts_cb ...");
 
     if (!is_streaming_active)
     {
+        // write_log("[Koditox Native] WARNING: is_streaming_active is false");
         return;
     }
 
     if (udp_audio_socket == INVALID_SOCKET || pcm == NULL || sample_count == 0) {
+        write_log("[Koditox Native] WARNING: Callback ignored due to invalid socket, empty PCM pointer, or zero sample count");
         return;
     }
 
     // Protect pipeline: Ignore non-48000Hz frames to prevent FFmpeg timeline collapse
     if (sampling_rate != 48000) {
+        // write_log("[Koditox Native] WARNING: Discarded audio frame with incompatible sample rate: %d Hz (Expected 48000 Hz)", sampling_rate);
         return; 
     }
 
@@ -863,16 +857,40 @@ static void t_toxav_receive_audio_frame_pts_cb(ToxAV *av, uint32_t friend_number
     } 
     else {
         // Drop rare multi-channel layouts (e.g. 5.1 surrounding sound configurations)
+        // write_log("[Koditox Native] WARNING: Dropped unsupported multi-channel layout: %d channels", channels);
         return;
     }
 
     // Chunk and stream the verified stereo PCM data directly to port 28889
     size_t written = 0;
+    int transmission_error_detected = 0;
+
     while (written < final_pcm_size) {
         size_t chunk = (final_pcm_size - written > 1300) ? 1300 : (final_pcm_size - written);
-        sendto(udp_audio_socket, (const char*)&send_data[written], chunk, MSG_NOSIGNAL, 
-               (struct sockaddr*)&kodi_audio_addr, sizeof(kodi_audio_addr));
-        written += chunk;
+        
+        // Execute socket transmission operation
+        ssize_t bytes_sent = sendto(udp_audio_socket, (const char*)&send_data[written], chunk, MSG_NOSIGNAL, 
+                                    (struct sockaddr*)&kodi_audio_addr, sizeof(kodi_audio_addr));
+        
+        // --- INSTANT ERROR CHECKING ---
+        if (bytes_sent < 0) {
+            transmission_error_detected = errno;
+            write_log("[Koditox Native] ERROR: sendto failed chunk of size %zu bytes. OS Error Code: %d (%s)", 
+                      chunk, transmission_error_detected, strerror(transmission_error_detected));
+            break; // Stop chunk loop if socket pipeline is broken
+        }
+        
+        written += bytes_sent;
+    }
+
+    // --- THROTTLED DATA PROOF LOGGING ---
+    if (!transmission_error_detected && written == final_pcm_size) {
+        logged_frames_count++;
+        // Output confirmation exactly once every 50 processed frames (~1 second interval spacing)
+        if (logged_frames_count % 50 == 0) {
+            // write_log("[Koditox Native] SUCCESS: Dispatched frame #%u to port 28889. Volume: %zu bytes. Mode: %s", 
+            //          logged_frames_count, final_pcm_size, (channels == 1) ? "Mono->Stereo Upmix" : "Native Stereo");
+        }
     }
 }
 

@@ -11,7 +11,7 @@ cd "$_HOME_" || exit 1
 docker run --rm dockcross/linux-arm64 > ./dockcross-linux-arm64; chmod +x ./dockcross-linux-arm64 || exit 1
 
 ./dockcross-linux-arm64 bash -c 'ls -al;id;pwd;hostname;uname -a' || exit 1
-./dockcross-linux-arm64 bash -c './deps_linux.sh raspi' || exit 1
+ ./dockcross-linux-arm64 bash -c './deps_linux.sh raspi' || exit 1
 # ./dockcross-linux-arm64 bash -c './deps_linux.sh raspi "" nodownload' || exit 1
 
 ./dockcross-linux-arm64 bash -c '
