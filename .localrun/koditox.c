@@ -74,6 +74,11 @@ static const char *tox_name = "KodiTox";
 
 static FILE *video_pipe = NULL;
 volatile int is_streaming_active = 0;
+static uint32_t current_audio_bit_rate = 0;
+static uint32_t current_video_width = 0;
+static uint32_t current_video_height = 0;
+static int current_width = 0;
+static int current_height = 0;
 
 // Thread tracking variables
 static volatile bool g_loop_running = false;
@@ -357,6 +362,13 @@ void friendlist_onConnectionChange(Tox *m, uint32_t num, TOX_CONNECTION connecti
 static void t_toxav_call_cb(ToxAV *av, uint32_t friend_number, bool audio_enabled, bool video_enabled, void *user_data)
 {
     write_log("t_toxav_call_cb: incoming call ...");
+
+    // reset known video resolution, so we scan incoming H264 packets again
+    current_video_width = 0;
+    current_video_height = 0;
+    current_width = 0;
+    current_height = 0;
+
     TOXAV_ERR_ANSWER err;
     toxav_answer(av, friend_number, DEFAULT_GLOBAL_AUD_BITRATE, DEFAULT_GLOBAL_VID_BITRATE_NORMAL_QUALITY, &err);
 }
@@ -410,10 +422,6 @@ static const uint8_t pmt_packet[188] = {
 
 
 
-
-// Track current stream canvas state
-static int current_width = 0;
-static int current_height = 0;
 
 // Helper to read individual bits from the raw SPS byte array
 typedef struct {
@@ -527,6 +535,11 @@ static void parse_and_check_sps(const uint8_t *sps, size_t size) {
     // Convert Macroblocks to absolute Pixels
     int width = (pic_width_in_mbs_minus1 + 1) * 16;
     int height = (pic_height_in_map_units_minus1 + 1) * 16 * (2 - frame_mbs_only_flag);
+
+    if (width != current_video_width || height != current_video_height) {
+        current_video_width = width;
+        current_video_height = height;
+    }
     
     // Check if the resolution changed during runtime execution
     if (width != current_width || height != current_height) {
@@ -717,25 +730,31 @@ static void t_toxav_receive_video_frame_h264_cb(ToxAV *av, uint32_t friend_numbe
         return;
     }
 
-#if 0
-    // Scan incoming frame chunks for inline NAL unit indicators
-    for (size_t i = 0; i < buf_size - 4; i++) {
-        if (buf[i] == 0x00 && buf[i+1] == 0x00) {
-            size_t start_code_len = 0;
-            if (buf[i+2] == 0x01) start_code_len = 3;
-            else if (buf[i+2] == 0x00 && buf[i+3] == 0x01) start_code_len = 4;
-            
-            if (start_code_len > 0) {
-                uint8_t nal_type = buf[i + start_code_len] & 0x1F;
-                if (nal_type == 7) { // 7 = Sequence Parameter Set (SPS)
-                    // Safely isolate the SPS block data
-                    parse_and_check_sps(&buf[i + start_code_len], buf_size - (i + start_code_len));
-                    break;
+#if 1
+    // only scan incoming packets until we know the video resolution
+    if ((current_video_width == 0) && (current_video_height == 0))
+    {
+        // Scan incoming frame chunks for inline NAL unit indicators
+        for (size_t i = 0; i < buf_size - 4; i++) {
+            if (buf[i] == 0x00 && buf[i+1] == 0x00) {
+                size_t start_code_len = 0;
+                if (buf[i+2] == 0x01) start_code_len = 3;
+                else if (buf[i+2] == 0x00 && buf[i+3] == 0x01) start_code_len = 4;
+
+                if (start_code_len > 0) {
+                    uint8_t nal_type = buf[i + start_code_len] & 0x1F;
+                    if (nal_type == 7) { // 7 = Sequence Parameter Set (SPS)
+                        // Safely isolate the SPS block data
+                        parse_and_check_sps(&buf[i + start_code_len], buf_size - (i + start_code_len));
+                        break;
+                    }
                 }
             }
         }
     }
+#endif
 
+#if 0
     // ==========================================
     // INITIAL HANDSHAKE INJECTION (BURST ONLY)
     // ==========================================
@@ -813,6 +832,11 @@ static void t_toxav_receive_audio_frame_pts_cb(ToxAV *av, uint32_t friend_number
     {
         // write_log("[Koditox Native] WARNING: is_streaming_active is false");
         return;
+    }
+
+    if (current_audio_bit_rate != sampling_rate)
+    {
+        current_audio_bit_rate = sampling_rate;
     }
 
     if (udp_audio_socket == INVALID_SOCKET || pcm == NULL || sample_count == 0) {
@@ -902,6 +926,8 @@ static void t_toxav_receive_audio_frame_pts_cb(ToxAV *av, uint32_t friend_number
 typedef struct {
     uint32_t friend_number;
     int64_t toxav_decoder_bitrate;
+    uint32_t toxav_video_width;
+    uint32_t toxav_video_height;
     int64_t toxav_network_roundtrip_ms;
     int32_t toxav_play_buffer_entries;
     int64_t toxav_incoming_fps;
@@ -910,7 +936,7 @@ typedef struct {
 } ToxTelemetryData;
 
 // Global thread-local memory allocation
-static ToxTelemetryData g_latest_telemetry = {0, 0, 0, 0, 0, "", 0};
+static ToxTelemetryData g_latest_telemetry = {0, 0, 0, 0, 0, 0, 0, "", 0};
 
 // Your actual Tox library callback function running on the network thread
 static void t_toxav_call_comm_cb(ToxAV *av, uint32_t friend_number, TOXAV_CALL_COMM_INFO comm_value,
@@ -995,6 +1021,10 @@ static void t_toxav_call_comm_cb(ToxAV *av, uint32_t friend_number, TOXAV_CALL_C
     if ((int)comm_value == TOXAV_CALL_COMM_PLAY_BUFFER_ENTRIES) { g_latest_telemetry.toxav_play_buffer_entries = (int)comm_number; }
     if ((int)comm_value == TOXAV_CALL_COMM_INCOMING_FPS) { g_latest_telemetry.toxav_incoming_fps = comm_number; }
 
+    g_latest_telemetry.toxav_video_width = current_video_width;
+    g_latest_telemetry.toxav_video_height = current_video_height;
+    // write_log("video resolution:%d x %d", current_video_width, current_video_height);
+
     TOX_ERR_FRIEND_QUERY error3;
     TOX_ERR_FRIEND_QUERY error4;
     bool res_get_name = false;
@@ -1040,6 +1070,8 @@ static void t_toxav_call_comm_cb(ToxAV *av, uint32_t friend_number, TOXAV_CALL_C
 // Python will poll this function to copy the telemetry values out
 EXPORT int get_latest_telemetry(uint32_t *out_friend,
             int64_t *toxav_decoder_bitrate,
+            uint32_t *toxav_video_width,
+            uint32_t *toxav_video_height,
             int64_t *toxav_network_roundtrip_ms,
             int32_t *toxav_play_buffer_entries,
             int64_t *toxav_incoming_fps,
@@ -1056,6 +1088,8 @@ EXPORT int get_latest_telemetry(uint32_t *out_friend,
     *out_friend = g_latest_telemetry.friend_number;
 
     *toxav_decoder_bitrate = g_latest_telemetry.toxav_decoder_bitrate;
+    *toxav_video_width = g_latest_telemetry.toxav_video_width;
+    *toxav_video_height = g_latest_telemetry.toxav_video_height;
     *toxav_network_roundtrip_ms = g_latest_telemetry.toxav_network_roundtrip_ms;
     *toxav_play_buffer_entries = g_latest_telemetry.toxav_play_buffer_entries;
     *toxav_incoming_fps = g_latest_telemetry.toxav_incoming_fps;

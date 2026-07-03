@@ -844,6 +844,8 @@ class ToxVideoMonitor(xbmc.Player):
         self.native_lib.get_latest_telemetry.argtypes = [
             ctypes.POINTER(ctypes.c_uint32), # Pointer to friend_number
             ctypes.POINTER(ctypes.c_int64),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_uint32),
             ctypes.POINTER(ctypes.c_int64),
             ctypes.POINTER(ctypes.c_int32),
             ctypes.POINTER(ctypes.c_int64),
@@ -874,6 +876,8 @@ class ToxVideoMonitor(xbmc.Player):
         # Create ctypes container variables to receive values from C
         friend_number = ctypes.c_uint32(0)
         toxav_decoder_bitrate = ctypes.c_int64(0)
+        toxav_video_width = ctypes.c_uint32(0)
+        toxav_video_height = ctypes.c_uint32(0)
         toxav_network_roundtrip_ms = ctypes.c_int64(0)
         toxav_play_buffer_entries = ctypes.c_int32(0)
         toxav_incoming_fps = ctypes.c_int64(0)
@@ -884,6 +888,8 @@ class ToxVideoMonitor(xbmc.Player):
             new_data_available = self.native_lib.get_latest_telemetry(
                 ctypes.byref(friend_number),
                 ctypes.byref(toxav_decoder_bitrate),
+                ctypes.byref(toxav_video_width),
+                ctypes.byref(toxav_video_height),
                 ctypes.byref(toxav_network_roundtrip_ms),
                 ctypes.byref(toxav_play_buffer_entries),
                 ctypes.byref(toxav_incoming_fps),
@@ -894,7 +900,7 @@ class ToxVideoMonitor(xbmc.Player):
             ## xbmc.log(f"[plugin.video.koditox] Polled new metrics", xbmc.LOGINFO)
             native_string = string_buffer.value.decode('utf-8', errors='ignore')
             if self.osd is not None:
-                    status_text = f"FPS: {toxav_incoming_fps.value} BR: {toxav_decoder_bitrate.value}"
+                    status_text = f"FPS: {toxav_incoming_fps.value} BR: {toxav_decoder_bitrate.value} RES: {toxav_video_width.value}x{toxav_video_height.value}"
                     self.osd.update_line1(status_text)                        
                     # status_text = f"RTT: {toxav_network_roundtrip_ms.value} BUF FRAMES: {toxav_play_buffer_entries.value}"
                     status_text = f"{native_string}"
