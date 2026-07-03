@@ -1,7 +1,6 @@
 # Tox Kodi video
 
-<img src="https://raw.githubusercontent.com/zoff99/kodi_tox_plugin/refs/heads/master/docs/koditox_screen_001.png" width="80%">
-
+<img src="https://raw.githubusercontent.com/zoff99/kodi_tox_plugin/refs/heads/master/docs/koditox_screen_001.png" width="40%">&nbsp;<img src="https://raw.githubusercontent.com/zoff99/kodi_tox_plugin/refs/heads/master/docs/koditox_screen_002.png" width="40%">
 
 Tox Kodi video is a specialized Kodi video add-on that enables secure, peer-to-peer streaming of live video
 over the encrypted Tox protocol.
