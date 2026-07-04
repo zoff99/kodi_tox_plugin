@@ -26,6 +26,9 @@ DEBUG_MODE = False
 ##
 ## #####################
 
+current_caller = None
+last_caller = None
+
 
 def load_native_library():
 
@@ -724,6 +727,19 @@ def save_engine_pids(video_pid, audio_pid):
     except Exception as e:
         xbmc.log(f"[plugin.video.koditox] Failed to write PID file: {e}", xbmc.LOGERROR)
 
+
+def native_stop_call(native_lib):
+    """hangs up the tox av call in native code"""
+    global current_caller
+    global last_caller
+    current_caller = None
+    last_caller = None
+
+    native_lib.stop_toxav_call.argtypes = []
+    native_lib.stop_toxav_call.restype = None
+    native_lib.stop_toxav_call()
+
+
 def hard_kill_tracked_pids():
     """Reads the stored PIDs and issues a kernel-level SIGKILL directly to the OS layers."""
     profile_dir = xbmcvfs.translatePath("special://profile/addon_data/plugin.video.koditox")
@@ -830,7 +846,6 @@ class ToxOSDOverlay(xbmcgui.WindowDialog):
         self.label_line2.setLabel(text)
 
 
-
 class ToxVideoMonitor(xbmc.Player):
     def __init__(self, native_lib):
         super().__init__()
@@ -854,10 +869,14 @@ class ToxVideoMonitor(xbmc.Player):
 
         self.native_lib.get_latest_telemetry.restype = ctypes.c_int # Returns 0 or 1
 
+        self.native_lib.get_current_caller.argtypes = []
+        self.native_lib.get_current_caller.restype = ctypes.c_int64
+
     def onAVStarted(self):
         xbmc.log("[plugin.video.koditox] Video active. Initializing OSD and starting polling loop.", xbmc.LOGINFO)
+
         xbmc.sleep(500)
-        
+
         try:
             self.osd = ToxOSDOverlay()
             self.osd.show()
@@ -872,7 +891,10 @@ class ToxVideoMonitor(xbmc.Player):
 
     def _telemetry_poll_loop(self):
         xbmc.log("[plugin.video.koditox] Telemetry poll thread started.", xbmc.LOGINFO)
-        
+
+        global current_caller
+        global last_caller
+
         # Create ctypes container variables to receive values from C
         friend_number = ctypes.c_uint32(0)
         toxav_decoder_bitrate = ctypes.c_int64(0)
@@ -910,15 +932,24 @@ class ToxVideoMonitor(xbmc.Player):
             for _ in range(10):
                 if not self.is_running or self.kodi_monitor.abortRequested():
                     break
+                current_caller = self.native_lib.get_current_caller()
+                if current_caller != last_caller:
+                    if last_caller != None:
+                        xbmc.log("[plugin.video.koditox] Caller changed, hangup call", xbmc.LOGINFO)
+                        hard_kill_tracked_pids()
+                        self.cleanup()
+                    last_caller = current_caller
                 xbmc.sleep(100)
 
     def onPlayBackStopped(self):
         xbmc.log("[plugin.video.koditox] Stream playback stopped by user interaction.", xbmc.LOGINFO)
+        native_stop_call(self.native_lib)
         hard_kill_tracked_pids()
         self.cleanup()
 
     def onPlayBackEnded(self):
         xbmc.log("[plugin.video.koditox] Stream playback ended by remote stream closure.", xbmc.LOGINFO)
+        native_stop_call(self.native_lib)
         hard_kill_tracked_pids()
         self.cleanup()
 

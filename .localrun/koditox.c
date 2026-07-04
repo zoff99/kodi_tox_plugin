@@ -80,6 +80,9 @@ static uint32_t current_video_height = 0;
 static int current_width = 0;
 static int current_height = 0;
 
+static int64_t current_caller = -1;
+pthread_mutex_t caller_lock = PTHREAD_MUTEX_INITIALIZER;
+
 // Thread tracking variables
 static volatile bool g_loop_running = false;
 static volatile bool gav_loop_running = false;
@@ -236,6 +239,53 @@ static THREAD_RETURN toxava_worker_loop(void *arg) {
 }
 
 
+static void end_call(void)
+{
+    pthread_mutex_lock(&caller_lock);
+    current_caller = -1;
+    pthread_mutex_unlock(&caller_lock);
+}
+
+EXPORT int64_t get_current_caller(void)
+{
+    int64_t current;
+    pthread_mutex_lock(&caller_lock);
+    current = current_caller;
+    pthread_mutex_unlock(&caller_lock);
+    return current;
+}
+
+static bool try_start_call(uint32_t user_id)
+{
+    bool success = false;
+    pthread_mutex_lock(&caller_lock);
+
+    if (current_caller == -1) {
+        current_caller = (int64_t)user_id;
+        success = true;
+    } else {
+        success = false;
+    }
+
+    pthread_mutex_unlock(&caller_lock);
+    return success;
+}
+
+EXPORT void stop_toxav_call() {
+    write_log("stop_toxav_call: stopping an active toxav call ...");
+
+    if (global_toxav != NULL)
+    {
+        int64_t cur_caller = get_current_caller();
+        if (cur_caller != -1)
+        {
+            write_log("stop_toxav_call: hang up incoming call");
+            TOXAV_ERR_CALL_CONTROL error = 0;
+            toxav_call_control(global_toxav, (uint32_t)cur_caller, TOXAV_CALL_CONTROL_CANCEL, &error);
+            end_call();
+        }
+    }
+}
 
 Tox *create_tox(const char* p_dir)
 {
@@ -369,19 +419,44 @@ static void t_toxav_call_cb(ToxAV *av, uint32_t friend_number, bool audio_enable
     current_width = 0;
     current_height = 0;
 
-    TOXAV_ERR_ANSWER err;
-    toxav_answer(av, friend_number, DEFAULT_GLOBAL_AUD_BITRATE, DEFAULT_GLOBAL_VID_BITRATE_NORMAL_QUALITY, &err);
+    if (try_start_call(friend_number))
+    {
+        write_log("t_toxav_call_cb: starting call ...");
+        TOXAV_ERR_ANSWER err;
+        toxav_answer(av, friend_number, DEFAULT_GLOBAL_AUD_BITRATE, DEFAULT_GLOBAL_VID_BITRATE_NORMAL_QUALITY, &err);
+    }
+    else
+    {
+        write_log("t_toxav_call_cb: there is already an ongoing call, reject incoming call");
+        TOXAV_ERR_CALL_CONTROL error = 0;
+        toxav_call_control(av, friend_number, TOXAV_CALL_CONTROL_CANCEL, &error);
+    }
 }
 
 static void t_toxav_call_state_cb(ToxAV *av, uint32_t friend_number, uint32_t state, void *user_data)
 {
     write_log("t_toxav_call_state_cb: call state change fn: %d state: %d", (int)friend_number, (int)state);
+
+    if (get_current_caller() == (int64_t)friend_number)
+    {
+        if (state & TOXAV_FRIEND_CALL_STATE_FINISHED)
+        {
+            write_log("t_toxav_call_state_cb: call state change fn: %d state: TOXAV_FRIEND_CALL_STATE_FINISHED", (int)friend_number);
+            end_call();
+        }
+        else if (state & TOXAV_FRIEND_CALL_STATE_ERROR)
+        {
+            write_log("t_toxav_call_state_cb: call state change fn: %d state: TOXAV_FRIEND_CALL_STATE_ERROR", (int)friend_number);
+            end_call();
+        }
+    }
 }
 
 static void t_toxav_bit_rate_status_cb(ToxAV *av, uint32_t friend_number,
                                        uint32_t audio_bit_rate, uint32_t video_bit_rate,
                                        void *user_data)
 {
+    write_log("t_toxav_bit_rate_status_cb: suggested audio_bit_rate=%u video_bit_rate=%u", audio_bit_rate, video_bit_rate);
 }
 
 static void t_toxav_receive_video_frame_cb(ToxAV *av, uint32_t friend_number,
